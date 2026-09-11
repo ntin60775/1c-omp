@@ -24,10 +24,9 @@ PAT='erp-main|ERP_RB|v69|АгентРазраб|prog7|РХ_|Akitorg|Соглаш
 grep -rnE "$PAT" --include='*.md' --include='*.ts' --include='*.py' . \
   | grep -v '^\./AGENTS.md' && echo 'НАЙДЕНО — править'
 
-# 2. Каждый хук грузится
-for f in extensions/*.ts; do
-  bun -e "await import('./$f')" && echo "ok $f"
-done
+# 2. Поведение хука и замка: модули грузятся, логика совпадает с ожиданием
+bun run tests/ib-lock.test.ts      # замок на инфобазу
+bun run tests/unica-gate.test.ts   # хук: гейты и замок
 ```
 
 ## Связанные репозитории
