@@ -14,6 +14,13 @@ import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks";
 import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import {
+	acquireBaseLock,
+	describeHolder,
+	releaseBaseLock,
+	releaseLocksForPid,
+	resolveInfobaseConnection,
+} from "../lib/ib-lock.ts";
 
 // ── журнал ───────────────────────────────────────────────────────────────────
 
@@ -339,6 +346,37 @@ function missingWorktreeWorkspace(dir: string): string[] {
 	return missing;
 }
 
+// ── замок на инфобазу ───────────────────────────────────────────────────────
+
+/** Операции, которые меняют базу или снимают с неё снимок. */
+const IB_MUTATING = new Set(["build", "load", "update", "test", "launch", "make"]);
+
+/** Имя операции Unica из аргументов вызова; null, если его нет. */
+function unicaOperation(content: string): string | null {
+	try {
+		const args = JSON.parse(content) as Record<string, unknown>;
+		const op = String(args.operation ?? "");
+		return op === "" ? null : op;
+	} catch {
+		return null;
+	}
+}
+
+/** cwd вызова Unica: из аргументов, иначе каталог сессии. */
+function callDirectory(content: string, fallback: string): string {
+	try {
+		const args = JSON.parse(content) as Record<string, unknown>;
+		return String(args.cwd ?? fallback);
+	} catch {
+		return fallback;
+	}
+}
+
+/** Долгая операция идёт задачей: её замок держится до конца задачи. */
+function isLongRunning(xdPath: string): boolean {
+	return xdPath.includes("runtime_job");
+}
+
 export default function unicaGate(pi: HookAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
 		const tool = event.toolName;
@@ -420,6 +458,33 @@ export default function unicaGate(pi: HookAPI): void {
 						].join("\n"),
 					};
 				}
+
+				// ── замок на инфобазу ──
+				// Серверная база одна на все деревья проекта: изоляции нет,
+				// поэтому одновременно с ней работает только одно дерево.
+				const operation = unicaOperation(content);
+				if (operation && IB_MUTATING.has(operation)) {
+					const connection = resolveInfobaseConnection(callCwd);
+					if (connection) {
+						const taken = acquireBaseLock({ tree: callCwd, connection, operation });
+						if (!taken.ok) {
+							audit(`unica ${operation}`, `база занята деревом ${taken.holder.tree}`);
+							return {
+								block: true,
+								reason: [
+									`База занята другим деревом (worktree-env).`,
+									``,
+									`База:   ${connection}`,
+									`Держит: ${describeHolder(taken.holder)}`,
+									``,
+									`Серверная база одна на все деревья проекта, поэтому с ней`,
+									`одновременно работает только одно дерево. Дождись освобождения`,
+									`или останови операцию в том дереве.`,
+								].join("\n"),
+							};
+						}
+					}
+				}
 			}
 		}
 
@@ -476,5 +541,28 @@ export default function unicaGate(pi: HookAPI): void {
 				};
 			}
 		}
+	});
+
+	// ── замок на инфобазу: освобождение ─────────────────────────────────────
+	// Синхронная операция отпускает базу сразу; задача держит её до конца,
+	// потому что вызов job.start возвращается, а работа продолжается.
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.toolName !== "write") return;
+		const input = event.input as Record<string, unknown> | undefined;
+		const xdPath = String(input?.path ?? "");
+		if (!xdPath.startsWith("xd://mcp__unica_unica_unica_")) return;
+		if (isLongRunning(xdPath)) return;
+		const content = String(input?.content ?? "");
+		const operation = unicaOperation(content);
+		if (!operation || !IB_MUTATING.has(operation)) return;
+		const dir = callDirectory(content, ctx.cwd);
+		const connection = resolveInfobaseConnection(dir);
+		if (connection) releaseBaseLock(dir, connection);
+	});
+
+	// Страховка от падения: при остановке сессии снимаем свои замки, чтобы
+	// база не осталась занятой до истечения срока.
+	pi.on("session_shutdown", () => {
+		releaseLocksForPid(process.pid);
 	});
 }
