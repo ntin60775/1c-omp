@@ -60,6 +60,9 @@ omp-плагин контура 1С-разработки: правила, хук
 
 ## Установка
 
+Полный порядок для **новой машины и существующего проекта** — включая снятие
+старых копий, которые заслоняют плагин, — в [DEPLOY.md](DEPLOY.md). Коротко:
+
 ```bash
 omp plugin marketplace add IngvarConsulting/unica-marketplace   # один раз на машине
 omp plugin marketplace add ntin60775/sot-omp-marketplace        # один раз на машине
