@@ -85,7 +85,8 @@ B=".omp/.backup-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$B"
 
 Сессия в проекте должна:
 
-- видеть навыки `1c-project-bootstrap`, `unica-project-setup`, `unica-test-contour`;
+- видеть навыки `1c-project-bootstrap`, `unica-project-setup`, `unica-test-contour`,
+  `1c-mcp-server`;
 - показывать в `domain-rules` правила плагина: `1c-bsl-code-style`,
   `platform-tools-stack`, `retry-discipline`, `worktree-env`
   (остальные правила 1С — TTSR: они не листятся, а срабатывают по потоку);

@@ -43,6 +43,7 @@ omp-плагин контура 1С-разработки: правила, хук
 | `skills/1c-project-bootstrap/` | развёртывание контура в проекте: маркетплейсы, Unica, структура, `v8project.*`, тестовый контур |
 | `skills/unica-project-setup/` | настройка Unica под проект: MCP без дублей, `v8project.yaml` руками, секреты в local-overlay, первая выгрузка |
 | `skills/unica-test-contour/` | YAxUnit и Vanessa на живой ИБ |
+| `skills/1c-mcp-server/` | расширение `MCP_Сервер`: чтение данных, кода, метаданных и журнала регистрации через публикацию HTTP-сервиса — подключение, девять инструментов, разбор ответов `health` |
 
 Хуки объявлены в `package.json` → `omp.extensions`: это extension-модули
 (используют `HookAPI`), а не декларативные `hooks/pre|post`.
