@@ -1,8 +1,8 @@
 {
   "name": "1c-omp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
-  "description": "omp-плагин контура 1С-разработки: правила BSL, хуки гейтов Unica и навыки развёртывания контура",
+  "description": "omp-плагин контура 1С-разработки: правила BSL, хуки гейтов Unica, навыки развёртывания контура и работы с расширением MCP_Сервер",
   "omp": {
     "extensions": [
       "./extensions/unica-gate.ts",
