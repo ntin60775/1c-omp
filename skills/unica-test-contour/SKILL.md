@@ -1,6 +1,6 @@
 ---
 name: unica-test-contour
-description: "Развёртывание и диагностика тестового контура 1С под Unica/v8-runner: YAxUnit + Vanessa Automation на живой ИБ. Используй когда нужно поднять контур тестирования с нуля, установить YAxUnit .cfe в ИБ, настроить/починить прогоны test yaxunit / test va, или когда прогон пересобирает основную конфигурацию, падает с «Пользователь ИБ не идентифицирован», «Расширение подключено в безопасном режиме», «junit file is empty», «utility 1cv8c was not found inside strict platform boundary»."
+description: "Развёртывание и диагностика тестового контура 1С под Unica/v8-runner: YAxUnit + Vanessa Automation на живой ИБ. Используй когда нужно поднять контур тестирования с нуля, установить YAxUnit .cfe в ИБ, настроить/починить прогоны test yaxunit / test va, когда прогон пересобирает основную конфигурацию, падает с «Пользователь ИБ не идентифицирован», «Расширение подключено в безопасном режиме», «junit file is empty», «utility 1cv8c was not found inside strict platform boundary», либо нужен дисплей для параллельных прогонов и доказательство приёмки."
 tags: [1c, unica, v8-runner, yaxunit, vanessa, testing]
 ---
 
@@ -20,8 +20,12 @@ tags: [1c, unica, v8-runner, yaxunit, vanessa, testing]
    `ps aux | grep '[1]cv8'`; для файловой ИБ — нет `build/ib/*.lck`.
    Конфигуратор держит монопольную блокировку.
 4. **Креды — только в `v8project.local.yaml`** (gitignored); в чат/лог/коммиты
-   не выводить. Пароль в `ДопПараметры` Vanessa — только если без него прогон
-   не проходит, и файл `VAParams.json` тогда не коммитить с паролем.
+   не выводить. `tools/VAParams.json` и `tools/va-env.local.json` собираются из
+   него скриптом `bootstrap-local-config.py`, лежат под `0600` и в git не
+   попадают.
+5. **Дисплей прогона — собственный на каждый запуск** (`Xvfb -displayfd` через
+   `xvfb-run-1c.sh`), не фиксированный `:99`: параллельные прогоны не мешают
+   друг другу.
 
 ## 1. Резолв инструментов (не хардкодить версии)
 
@@ -72,7 +76,15 @@ unica.runtime.execute { "cwd": "...", "operation": "tools-download", "tool": "va
 
 `load --extension <Имя>` годится только для расширения, которое УЖЕ есть в ИБ
 (probe совместимости падает: «Не найдено расширение»). Первичная установка —
-конфигуратором:
+по типу ИБ.
+
+**Файловая** — `ibcmd`, `--user`/`--password` в КОНЕЦ команды:
+
+```bash
+ibcmd infobase config load --db-path <абс. путь к ИБ> --extension=<Имя> <файл.cfe> --user <u> --password <p>
+```
+
+**Конфигуратор** — работает для обоих типов ИБ (`/F` — файловая, `/S` — серверная):
 
 ```bash
 <платформа>/1cv8 DESIGNER /F"<путь к файловой ИБ>" \
@@ -85,19 +97,27 @@ unica.runtime.execute { "cwd": "...", "operation": "tools-download", "tool": "va
   конфигурации»).
 - **НЕ передавать `/P""`** при пустом пароле: пустой пароль-флаг → «Пользователь
   ИБ не идентифицирован», exit 1. Без `/P` вообще — вход проходит.
-- Для серверной ИБ: `/S"srv=...;ref=..."` вместо `/F`.
+- Для серверной ИБ: `/S"сервер\база"` вместо `/F`.
 
 ## 5. Безопасный режим
 
 YAxUnit и тестовое расширение — БЕЗ «Безопасного режима» и «Защиты от опасных
 действий», иначе на прогоне: «Расширение подключено в безопасном режиме. Чтение
-конфигурационного файла недоступно» → `JUnit report was not produced`.
+конфигурационного файла недоступно» → `JUnit report was not produced`. На
+прогоне симптом выглядит не как ошибка, а как `enterprise test run timed out`
+(300 с) — смотреть `enterprise.out.log`.
 
-- Расширение, объявленное source-set'ом: `unica.runtime.execute`
-  `operation: extensions`, `sourceSet: <имя>` (снимает оба флага сам).
-- Сторонний .cfe (YAxUnit) без source-set'а — только руками в конфигураторе
-  (оператор) или повторной установкой с нужными свойствами.
-- После ручной правки — обновить БД (F7 / `/UpdateDBCfg`).
+Снятие — по типу ИБ:
+
+| ИБ | Как |
+|---|---|
+| файловая | `ibcmd extension update --db-path <абс> --name=<Имя> --safe-mode=no --user <u> --password <p>` |
+| расширение, объявленное source-set'ом | `unica.runtime.execute` `operation: extensions`, `sourceSet: <имя>` (на файловой снимает оба флага) |
+| серверная | **только руками оператора в конфигураторе** — `extensions --name` на серверной ИБ падает с `server-based IBCMD connection requires infobase.dbms.kind` |
+
+Сторонний .cfe без source-set'а на серверной ИБ — только конфигуратор либо
+повторная установка с нужными свойствами. После ручной правки — обновить БД
+(F7 / `/UpdateDBCfg`). Снимать **до** первого прогона.
 
 ## 6. Тестовое расширение (YAxUnit 25.x)
 
@@ -124,8 +144,11 @@ load, десятки секунд).
 КонецПроцедуры
 ```
 
-Фильтр `tools/yaxunit.json` → `filter.extensions` должен совпадать с именем
-тестового расширения.
+Фильтр прогона задаёт **YAxUnit/конфиг прогона**, не `tools/yaxunit.json`:
+файл `tools/yaxunit.json` раннер не читает (в CLI `test yaxunit` только
+`all|module`, конфиг-файла нет; в схеме `v8project.yaml` у `tests.yaxunit`
+только `timeouts`), поэтому фильтр по имени расширения в нём не работает —
+признак: `total` не меняется при заведомо неверном `filter.extensions`.
 
 ## 7. Прогоны
 
@@ -133,9 +156,18 @@ MCP-контракт `unica.runtime.execute operation: test` флага `--no-bu
 экспонирует → обход прямым раннером (назвать gap перед обходом; инвариант 2):
 
 ```bash
-"$V8R" test yaxunit all --no-build     # все YAxUnit-тесты
-"$V8R" test va --no-build              # Vanessa по профилю tests.va из v8project.yaml
-"$V8R" test va --no-build --feature "<ИмяФичи.feature>"   # только ИМЯ файла
+P1C=.omp/plugins/node_modules/1c-omp
+
+# оба шага сама поднимает виртуальный дисплей, если $DISPLAY пуст/мёртв
+"$P1C/skills/unica-test-contour/scripts/test-yaxunit.sh"                    # все тесты
+"$P1C/skills/unica-test-contour/scripts/test-yaxunit.sh" --module <Имя>     # отладка одного набора
+"$P1C/skills/unica-test-contour/scripts/xvfb-run-1c.sh" -- "$V8R" test va --no-build
+
+# то же руками, если обёртки неприменимы:
+"$V8R" test yaxunit all --no-build
+"$V8R" test va --no-build                                              # профиль tests.va из v8project.yaml
+"$V8R" test va --no-build --feature "<ИмяФичи.feature>"                # только ИМЯ файла
+"$V8R" test yaxunit module <ИмяМодуля> --no-build                      # отладка одного набора
 ```
 
 - `--feature` матчится **относительно `КаталогФич`**: путь `features/X.feature`
@@ -144,17 +176,42 @@ MCP-контракт `unica.runtime.execute operation: test` флага `--no-bu
   `VAParams.json` фильтруют по тегам — фичи должны нести тег профиля
   (обычно `@FirstStart`).
 
+### Дисплей: `xvfb-run-1c.sh`
+
+```bash
+xvfb-run-1c.sh -- <команда>                              # свой дисплей, номер выдаёт Xvfb
+xvfb-run-1c.sh --screenshot-at 75 --screenshot-dir build/out/frames -- <команда>
+xvfb-run-1c.sh --display-file build/out/display -- <команда>   # для ручных скриншотов
+DISPLAY=$(cat build/out/display) import -window root /tmp/frame.png
+```
+
+- Номер фиксированный не назначается: `Xvfb -displayfd` отдаёт свободный, два
+  параллельных прогона получают разные дисплеи.
+- Xvfb живёт ровно столько, сколько команда, и снимается по выходу (в т.ч.
+  по Ctrl-C): «фоновый `Xvfb &` умер вместе с шеллом» не повторяется.
+- На собственном дисплее cookie не нужен (запуск с `-ac`); на дисплее
+  оператора — передавать `XAUTHORITY` (см. `rule://test-contour`, «Мониторы»).
+- Первый Vanessa-прогон в чистой ИБ, первый прогон после новых сценариев и
+  после обновления EPF — на мониторе оператора: модальный диалог доверия к
+  внешнему файлу на виртуальном дисплее некому нажать.
+
 ### Vanessa-конфиг (`tools/VAParams.json`)
+
+Файл собирается из `tools/VAParams.template.json` скриптом
+`bootstrap-local-config.py` (значения из `v8project.local.yaml`, `0600`, в git
+не попадает); ручная правка допустима только в шаблоне.
 
 - `КлиентТестирования.ТаймаутЗапуска1С`: **≥ 300** (25 на тяжёлой конфигурации
   не доживает до старта клиента).
 - `КлиентТестирования.ДанныеКлиентовТестирования` — заполнить, иначе Vanessa
-  не знает, куда логиниться:
+  не знает, куда логиниться. Ключи **ровно** такие, другие имена
+  (`ПутьКИнформационнойБазе`, `Порт`, `ИмяПользователя`) не распознаются —
+  «Параметр не загружен»:
 
 ```json
 [{
   "Имя": "Этот клиент",
-  "ПутьКИнфобазе": "/F<абсолютный путь к файловой ИБ>",
+  "ПутьКИнфобазе": "File=\"<абсолютный путь>/build/ib\";",
   "ПортЗапускаТестКлиента": 48000,
   "ДопПараметры": "/N\"<пользователь из v8project.local.yaml>\"",
   "ТипКлиента": "Тонкий",
@@ -162,22 +219,46 @@ MCP-контракт `unica.runtime.execute operation: test` флага `--no-bu
 }]
 ```
 
+  Для серверной базы — `Srvr="<сервер>";Ref="<база>";`. Путь обязан указывать
+  на базу **этого** дерева: в ворктри скопированный из основного дерева файл
+  тихо тестирует чужую базу (см. `rule://worktree-env`).
+
   Пользователь здесь обязан совпадать с профилем запуска, под которым поднят
   контур, — при рассинхроне тест-клиент не стартует/не логинится.
+- **Креды для шагов, подключающих клиент сами** (`я подключаю TestClient …
+  логин … пароль …`): `ДопПараметры` на этом пути НЕ работает — пароль
+  передаётся только параметром шага. Берите его из `tools/va-env.local.json`
+  (создаётся тем же генератором) подстановкой в шаг кодом — готовый фрагмент
+  в `rule://vanessa-tests`, «Креды тест-клиента в шаге».
 - GUI-шумы в выводе (`canberra-gtk3-module`, `Couldn't connect to D-Bus`) —
   НЕ ошибки прогона.
 
 ## 8. Приёмка прогона (анти-«ложно-зелёный»)
 
 Зелёный `summary: total=N, passed=N` ничего не гарантирует: нескомпилировавшийся
-тестовый модуль молча не регистрируется. После КАЖДОГО прогона проверять вывод:
+тестовый модуль молча не регистрируется, а артефакты успешного прогона раннер
+удаляет. Штатный путь — обёртка, которая снимает доказательство из
+JSON-конверта и выносит вердикт сама:
 
-- нет `[error:test_report]` со строкой `ЗагрузкаТестов: Ошибка инициализации модуля`;
-- `total > 0` (0 сценариев при непустом наборе тестов = фильтр/имя расширения
-  в `yaxunit.json` не совпали);
-- junit-файл раннер может удалять после парсинга — ориентир stdout, артефакты
-  прогонов лежат в `build/temp/yaxunit/runs/<id>/` (`report.xml`, `runner.log`,
-  `enterprise.out.log`).
+```bash
+P1C=.omp/plugins/node_modules/1c-omp
+"$P1C/skills/unica-test-contour/scripts/test-yaxunit.sh"
+# exit 0 = приёмка; артефакты build/out/yaxunit/{last-run.json,junit.xml,log.txt,result.txt}
+```
+
+Код 1 при: ненулевом коде прогона, `failed`/`errors`, непустом списке ошибок
+инициализации модулей и при `total=0`.
+
+Если обёртка не используется — после КАЖДОГО прогона проверять в stdout раннера:
+
+- нет `[error:test_report]` со строкой `ЗагрузкаТестов: Ошибка инициализации модуля`
+  (в `enterprise.out.log` её НЕТ — он почти пуст);
+- `total > 0`: 0 зарегистрированных тестов = несовпавший фильтр/имя расширения;
+- junit-файл раннер может удалить после парсинга — ориентир stdout, артефакты
+  незавершённых прогонов лежат в `build/temp/yaxunit/runs/<id>/`
+  (`report.xml`, `runner.log`, `enterprise.out.log`);
+- Vanessa: все шаги в `build/out/cucumber/CucumberJson.json` имеют статус
+  `passed`; строки `[error:test_report] Error: 0 (0%)` — шум парсинга статуса.
 
 ## 9. Слои тестирования
 
@@ -193,10 +274,16 @@ MCP-контракт `unica.runtime.execute operation: test` флага `--no-bu
 | `No source sets were discovered` в project.status | нет `cwd` в MCP-вызове → добавить |
 | `utility '1cv8c' was not found inside strict platform boundary` | strict-привязка к серверной установке → на полную (п.2) |
 | `Пользователь ИБ не идентифицирован` от DESIGNER | `/P""` при пустом пароле → убрать `/P` (п.4) |
-| `failed to determine infobase compatibility state` / «Не найдено расширение» на load | расширение ещё не в ИБ → первичная установка конфигуратором (п.4) |
-| `Расширение подключено в безопасном режиме...` | safe mode → п.5 |
-| `JUnit report was not produced` / `junit file is empty` | safe mode, 0 тестов, или ошибка загрузки тестового модуля → п.5, п.8 |
-| `unknown extension source-set '<Имя>'` на extensions | расширение не объявлено source-set'ом → снять safe mode руками |
+| `Пользователь ИБ не идентифицирован` на базе, собранной из исходников | в ней нет пользователей → убрать креды из оверлея (см. `rule://ib-contour`) |
+| `failed to determine infobase compatibility state` / «Не найдено расширение» на load | расширение ещё не в ИБ → первичная установка (п.4) |
+| `Расширение подключено в безопасном режиме...` | safe mode → п.5: файловая ИБ — `ibcmd`, серверная — только оператор |
+| `enterprise test run timed out` (300 с) | модальный диалог (safe mode, доверие к EPF, «Региональные настройки») → `enterprise.out.log`, контрольный кадр дисплея (п.7) |
+| `JUnit report was not produced` / `junit file is empty` | safe mode, 0 тестов или ошибка загрузки тестового модуля → п.5, п.8 |
+| `unknown extension source-set '<Имя>'` на extensions | расширение не объявлено source-set'ом → снять safe mode штатным путём п.5 |
 | Vanessa: «Сценарии для выполнения не обнаружены» | `--feature` с путём вместо имени файла, или нет тега профиля → п.7 |
+| Vanessa: «Не получилось подключить TestClient, PID=0» / exit 139 | таймаут < 300, нет `ДанныеКлиентовТестирования` либо в шаге нет пароля → п.7 |
 | Прогон начал пересобирать основную конфигурацию | забыт `--no-build` → инвариант 2 |
 | partial load падает на XDTO/Form.xml | в partial-списке формы → full load: `build --source-set <имя> --full-rebuild` |
+| `Unable to initialize GTK+ or connect to the windowing system` | дисплей не поднят/умер → прогнать через `xvfb-run-1c.sh` (п.7) |
+| `Invalid MIT-MAGIC-COOKIE-1 key` | дисплей оператора из контейнера без `XAUTHORITY` → передать cookie (п.7) |
+| Таймаут прогона: «С этой информационной базой уже работает конфигуратор… сеанс» при пустом `ps` | блокировка чужого сеанса → просить оператора закрыть (см. `rule://ib-contour`) |

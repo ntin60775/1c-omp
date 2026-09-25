@@ -104,6 +104,10 @@ B=".omp/.backup-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$B"
 ## 5. Что остаётся сделать руками
 
 - `v8project.local.yaml` — креды ИБ и путь к платформе; в git не едет.
+- `tools/VAParams.template.json` — шаблон с плейсхолдерами в git; рабочие
+  `tools/VAParams.json` и `tools/va-env.local.json` собрать им же в каждом
+  дереве: `python3 <плагин>/skills/1c-project-bootstrap/scripts/bootstrap-local-config.py`
+  (значения берутся из оверлея, файлы 0600).
 - `tasks/init-worktree.sh` — обёртка на канон из плагина, см. `rules/worktree-env.md`.
 - `.gitignore`: `.omp/plugins/` — машинное состояние, в git ему не место.
 - Инфобаза: файловую поднять или скопировать, серверную взять существующую —

@@ -18,3 +18,11 @@ ConfigDumpInfo.xml
 src/cf/ConfigDumpInfo.xml
 src/cf/lastUploadedCommit.txt
 src/cf/lastUploadedConfigDumpInfo.xml
+
+# Локальный оверлей проекта: креды ИБ и путь к платформе (никогда в git)
+v8project.local.yaml
+v8project.test.local.yaml
+
+# Локальные конфиги тестового контура (собираются из оверлея, содержат креды)
+tools/VAParams.json
+tools/va-env.local.json

@@ -3,3 +3,7 @@
 .forbidden-names.txt
 
 node_modules/
+
+# Кэш питона: в плагине живут исполняемые скрипты на python3
+__pycache__/
+*.pyc

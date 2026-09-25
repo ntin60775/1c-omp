@@ -88,9 +88,14 @@ python3 "$SKILL_DIR/scripts/bootstrap.py" all \
 | 3 | Доп. каталоги: examples / lib / vendor | не создавать | `--extra` |
 | 4 | URL remote для origin | не добавлять | `--remote` |
 
-Тестовые фреймворки фиксированы: Vanessa (`features/` + `tools/VAParams.json`)
-и YAxUnit (`tests/cfe/` + `tools/yaxunit.json`). Скрипт создаёт каталоги,
-`AGENTS.md` в каждом, `packagedef`, `env.json`, `.gitignore`, `.gitattributes`.
+Тестовые фреймворки фиксированы: Vanessa (`features/`) и YAxUnit
+(`tests/cfe/`). Скрипт создаёт каталоги, `AGENTS.md` в каждом, `packagedef`,
+`env.json`, `.gitignore`, `.gitattributes` и шаблон
+`tools/VAParams.template.json`. Рабочий `tools/VAParams.json` и
+`tools/va-env.local.json` из него **не создаются**: значения есть только в
+`v8project.local.yaml`, их подставляет `scripts/bootstrap-local-config.py`
+(файлы получают права 0600 и закрыты `.gitignore`). Файл `tools/yaxunit.json`
+не заводится: раннер его не читает.
 
 ### 3. `v8project.yaml` — руками, не через MCP
 
@@ -175,8 +180,24 @@ unica.runtime.execute { "cwd": "...", "operation": "tools-download", "tool": "va
 unica.runtime.execute { "cwd": "...", "operation": "tools-download", "tool": "yaxunit", "dryRun": false }
 ```
 
-Артефакты лягут в `build/tools/`. Дальше — `tools/VAParams.json` под свою ИБ и
+Артефакты лягут в `build/tools/`. Дальше — сборка локальных конфигов Vanessa и
 установка тестового расширения; порядок и грабли — в навыке `unica-test-contour`.
+
+```bash
+python3 <каталог скилла>/scripts/bootstrap-local-config.py     # VAParams.json + va-env.local.json
+```
+
+Скрипт читает `v8project.local.yaml`, заполняет `ПутьКИнфобазе` (абсолютный путь
+**этого** дерева), `ДопПараметры` и таймаут ≥ 300, пишет оба файла под `0600` и
+не печатает значений. Повторный запуск без `--force` ничего не перезаписывает;
+после ветки/checkout, снявшего локальные файлы, — с флагом `--force`.
+
+Первый прогон на **своём** дисплее (для параллельных агентов фиксированный
+`:99` не подходит):
+
+```bash
+<каталог скилла с плагином>/skills/unica-test-contour/scripts/xvfb-run-1c.sh -- <команда>
+```
 
 ## Инварианты
 
@@ -184,8 +205,12 @@ unica.runtime.execute { "cwd": "...", "operation": "tools-download", "tool": "ya
 2. **`cwd` в каждом вызове Unica** — иначе workspace не резолвится.
 3. **Основную конфигурацию не пересобирать** — только частичная загрузка;
    расширения, наоборот, только с `fullRebuild: true`.
-4. **Секреты только в `v8project.local.yaml`** и только локально.
+4. **Секреты только в `v8project.local.yaml`** и только локально; из него
+   собираются `VAParams.json`/`va-env.local.json` (0600), они в git не
+   попадают и значения в чат/лог не выводятся.
 5. **Идемпотентность скрипта**: повторный запуск безопасен, существующие файлы
    не перезаписываются без `--force`.
 6. **Плагины ставятся в project scope** — не в user: 1С-контур принадлежит
-   проекту, а не машине.
+   проекту, а не машине. Шаг плагинов в ворктри пересоздаёт кэш и ломает уже
+   живой Unica MCP другой сессии — при работающих параллельных окнах запускать
+   с `--skip-plugins` (см. `rule://worktree-env` и `rule://unica-mcp`).

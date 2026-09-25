@@ -49,11 +49,14 @@ KIND_DIRS = {
 EXTRA_DIRS = ["examples", "lib", "vendor"]
 
 # Затравки-шаблоны: относительный путь в проекте -> файл в templates/.
+# VAParams.json раннер читает как шаблон, сам рабочий файл собирается из него
+# скриптом bootstrap-local-config.py и в git не попадает (в нём креды).
+# tools/yaxunit.json сюда не попадает: v8-runner его не читает (у tests.yaxunit
+# в схеме только timeouts, ключа пути нет и в CLI).
 SEED_FILES = {
     "features/Шаблон фичи.feature": "features/Шаблон фичи.feature",
     "features/Шаблон фичи ОФ.feature": "features/Шаблон фичи ОФ.feature",
-    "tools/VAParams.json": "tools/VAParams.json",
-    "tools/yaxunit.json": "tools/yaxunit.json",
+    "tools/VAParams.template.json": "tools/VAParams.template.json",
     "tools/syntax-check-excludes.txt": "tools/syntax-check-excludes.txt",
 }
 

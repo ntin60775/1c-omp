@@ -3,19 +3,25 @@
 # в git-ворктри. Запускать из основного дерева или из ворктри.
 #
 # Использование:
-#   tasks/init-worktree.sh /path/to/worktree
-#   tasks/init-worktree.sh /path/to/worktree --empty-ib   # файловая база: не копировать, создать пустую
+#   init-worktree.sh /path/to/worktree
+#   init-worktree.sh /path/to/worktree --empty-ib        # файловая база: не копировать, создать пустую
+#   init-worktree.sh /path/to/worktree --skip-plugins    # не ставить плагины: живой Unica MCP другой сессии
+#                                                        # переживёт только без пересоздания кэша плагинов
 #
 # Что делает:
 #   1. Копирует v8project.local.yaml (креды ИБ, путь к платформе)
 #   2. Копирует build/tools/ (YAxUnit.cfe, vanessa-automation-single.epf)
-#   3. Копирует tools/VAParams.json (профиль Vanessa; без него v8-runner падает
-#      на валидации конфига при ЛЮБОЙ операции)
+#   3. Собирает tools/VAParams.json и tools/va-env.local.json под ЭТО дерево из
+#      tools/VAParams.template.json + v8project.local.yaml (скрипт
+#      bootstrap-local-config.py). Готовый VAParams.json из основного дерева
+#      копировать нельзя: в нём абсолютный путь к базе основного дерева —
+#      тесты уйдут на чужую базу
 #   4. Разбирается с базой — см. «База» ниже
 #   5. Копирует build/hash-storages/ — только если состояние базы совпадает с
 #      основным деревом (иначе инкрементальное состояние невалидно)
 #   6. Ставит плагины проекта (project scope): .omp/plugins/ не отслеживается
-#      git и в ворктри не попадает
+#      git и в ворктри не попадает. Предупреждает, если живой Unica MCP может
+#      от этого сломаться (см. --skip-plugins)
 #   7. Проверяет результат
 #
 # База:
@@ -33,10 +39,12 @@
 set -euo pipefail
 
 EMPTY_IB=0
+SKIP_PLUGINS=0
 ARGS=()
 for arg in "$@"; do
 	case "$arg" in
 	--empty-ib) EMPTY_IB=1 ;;
+	--skip-plugins) SKIP_PLUGINS=1 ;;
 	*) ARGS+=("$arg") ;;
 	esac
 done
@@ -105,14 +113,53 @@ else
 	ERRORS=$((ERRORS + 1))
 fi
 
-# 3. tools/VAParams.json
+# 3. tools/VAParams.json (+ tools/va-env.local.json)
+# Шаблон в ворктри копируется, рабочий файл СОБИРАЕТСЯ под это дерево:
+# в копии из основного дерева лежит абсолютный ПутьКИнфобазе, и тест-клиент
+# тихо тестирует базу основного дерева (см. rule://worktree-env).
 mkdir -p "$WORKTREE/tools"
-if [[ -f "$MAIN_TREE/tools/VAParams.json" ]]; then
+TEMPLATE_FOUND=0
+if [[ -f "$MAIN_TREE/tools/VAParams.template.json" ]]; then
+	cp -p "$MAIN_TREE/tools/VAParams.template.json" "$WORKTREE/tools/VAParams.template.json"
+	TEMPLATE_FOUND=1
+	echo "✓ tools/VAParams.template.json"
+fi
+GENERATOR=""
+for g in "$(cd "$(dirname "$0")" && pwd)/bootstrap-local-config.py" \
+	"$MAIN_TREE/.omp/plugins/node_modules/1c-omp/skills/1c-project-bootstrap/scripts/bootstrap-local-config.py" \
+	"$WORKTREE/.omp/plugins/node_modules/1c-omp/skills/1c-project-bootstrap/scripts/bootstrap-local-config.py"; do
+	[[ -f "$g" ]] && { GENERATOR="$g"; break; }
+done
+if [[ $TEMPLATE_FOUND -eq 1 && -f "$WORKTREE/v8project.local.yaml" ]]; then
+	if [[ -n "$GENERATOR" ]]; then
+		# Значения не печатаются: скрипт пишет только имена заполненных ключей.
+		if python3 "$GENERATOR" --tree "$WORKTREE"; then
+			echo "✓ tools/VAParams.json + tools/va-env.local.json (собраны под ворктри)"
+		else
+			echo "✗ сборка профиля Vanessa не удалась" >&2
+			ERRORS=$((ERRORS + 1))
+		fi
+	else
+		echo "⚠ нет bootstrap-local-config.py — профиль не собран" >&2
+		ERRORS=$((ERRORS + 1))
+	fi
+elif [[ -f "$MAIN_TREE/tools/VAParams.json" ]]; then
+	# Старый канон без шаблона: копия с предупреждением о чужом пути.
 	cp -p "$MAIN_TREE/tools/VAParams.json" "$WORKTREE/tools/VAParams.json"
-	echo "✓ tools/VAParams.json"
+	echo "⚠ tools/VAParams.json скопирован как есть — проверь ПутьКИнфобазе:"
+	echo "  в нём может быть путь базы ОСНОВНОГО дерева (см. rule://worktree-env)"
 else
-	echo "✗ нет $MAIN_TREE/tools/VAParams.json — v8-runner не пройдёт валидацию" >&2
+	echo "✗ нет ни VAParams.template.json, ни VAParams.json в основном дереве —" >&2
+	echo "  v8-runner не пройдёт валидацию конфига" >&2
 	ERRORS=$((ERRORS + 1))
+fi
+# Креды тест-клиента для шагов Vanessa, подключающих клиент сами: канон раньше
+# их не копировал, и фичи падали на чтении файла в ворктри. Генератор уже
+# создаёт их под ворктри (см. выше), поэтому здесь — только путь без шаблона.
+if [[ ! -f "$WORKTREE/tools/va-env.local.json" && -f "$MAIN_TREE/tools/va-env.local.json" ]]; then
+	cp -p "$MAIN_TREE/tools/va-env.local.json" "$WORKTREE/tools/va-env.local.json"
+	chmod 600 "$WORKTREE/tools/va-env.local.json" 2>/dev/null || true
+	echo "✓ tools/va-env.local.json"
 fi
 
 # 4. База
@@ -158,8 +205,25 @@ elif [[ $COPY_HASHES -eq 0 ]]; then
 fi
 
 # 6. Плагины проекта (project scope)
+#
+# ВАЖНО: `omp plugin install` ПЕРЕСОЗДАЁТ каталог кэша плагина, а у живого
+# stdio-сервера Unica MCP рабочий каталог остался на удалённом иноде — все его
+# вызовы после этого падают с «failed to read current directory». Симптом,
+# диагностика и восстановление — rule://unica-mcp. Если в других окнах сейчас
+# работает Unica, либо пропусти шаг флагом --skip-plugins (плагины поставит
+# следующая сессия), либо выполни восстановление для зависших окон сразу.
 PLUGINS_JSON="$MAIN_TREE/.omp/plugins/installed_plugins.json"
-if [[ -f "$PLUGINS_JSON" ]]; then
+if [[ $SKIP_PLUGINS -eq 1 ]]; then
+	echo "• шаг плагинов пропущен (--skip-plugins): плагины в ворктри не ставились"
+	echo "  поставь их в свободное время либо оставь на следующую сессию"
+elif [[ -f "$PLUGINS_JSON" ]]; then
+	LIVE_UNICA="$(pgrep -af 'linux-x64/unica|unica-bootstrap' 2>/dev/null || true)"
+	if [[ -n "$LIVE_UNICA" ]]; then
+		echo "⚠ живые процессы Unica MCP — шаг плагинов может сломать их:"
+		printf '%s\n' "$LIVE_UNICA" | sed 's/^/    /'
+		echo "  при симптоме «failed to read current directory» — rule://unica-mcp,"
+		echo "  раздел «пересоздание кэша плагинов убивает живой сервер»"
+	fi
 	if command -v omp >/dev/null 2>&1; then
 		while IFS= read -r spec; do
 			[[ -n "$spec" ]] || continue
