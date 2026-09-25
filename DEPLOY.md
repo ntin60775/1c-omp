@@ -20,6 +20,12 @@ ssh -T git@github.com     # exit 1 — это нормально, признак
 
 ## 1. Машинный слой
 
+> **Приватный слой.** `sot-omp-core` — личный машинный слой (identity,
+> безопасность), доступен не всем. Без доступа к нему этот шаг пропускается:
+> плагину `1c` он не нужен, для контура достаточно шагов 2–5 — единственная
+> внешняя зависимость, Unica, берётся из публичного
+> `IngvarConsulting/unica-marketplace`.
+
 ```bash
 git clone git@github.com:ntin60775/sot-omp-core.git ~/home/dev/personal/sot-omp-core
 cd ~/home/dev/personal/sot-omp-core

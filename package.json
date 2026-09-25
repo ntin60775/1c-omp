@@ -1,7 +1,8 @@
 {
   "name": "1c-omp",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
+  "license": "MIT",
   "description": "omp-плагин контура 1С-разработки: правила BSL, хуки гейтов Unica, навыки развёртывания контура и работы с расширением MCP_Сервер",
   "omp": {
     "extensions": [
